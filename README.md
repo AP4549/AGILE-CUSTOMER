@@ -5,18 +5,39 @@ A customer support ticket management system with AI-powered analysis using local
 ## Project Structure
 
 ```
-AI-CustomerSupport-System/
+Backend (Flask API)
+├── API Endpoints
+│   ├── /status - Server and Ollama connection status
+│   ├── /historical-data - Access to past tickets
+│   ├── /conversations - Retrieves conversation examples
+│   ├── /tickets - Lists all support tickets
+│   └── /process-ticket - Main endpoint for AI analysis
 │
-├── frontend/                            # 💻 React + Vite frontend
-│   └── ... (current React application)
+├── Multi-Agent System
+│   ├── Summarizer Agent - Creates concise summaries with key points
+│   ├── Action Extractor - Identifies required steps with priorities
+│   ├── Team Router - Determines optimal department routing
+│   ├── Sentiment Analyzer - Performs emotional content analysis
+│   ├── Resolution Recommender - Suggests solutions from historical data
+│   └── Time Estimator - Predicts resolution time with factors
 │
-├── backend/                             # 🧠 Python backend with multi-agent system
-│   ├── agents/                          # Core agent functionality
-│   ├── db/                              # SQLite database
-│   ├── data/                            # Historical data
-│   └── ollama_llm/                      # LLM interaction
+├── Support Components
+│   ├── DataLoader - Retrieves historical ticket data
+│   └── call_ollama_agent() - Communicates with LLM API
+
+Frontend (React)
+├── Components
+│   ├── Dashboard - Main UI container
+│   ├── TicketList - Displays and filters tickets
+│   ├── TicketDetail - Shows selected ticket information
+│   ├── AgentResults - Displays AI analysis output
+│   └── OllamaConfig - Connection settings interface
 │
-└── README.md                            # Project documentation
+├── State Management
+│   └── AgentContext - Manages ticket selection and AI processing
+│
+└── API Integration
+    └── OllamaClient - Handles direct or backend AI communication
 ```
 
 ## Setup Instructions
