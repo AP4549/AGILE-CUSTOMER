@@ -1,6 +1,7 @@
 # AI Customer Support System
 
 A customer support ticket management system with AI-powered analysis using local LLMs via Ollama.
+![image](https://github.com/user-attachments/assets/c0bd7e76-03f9-4ce3-afd6-060866fea986)
 
 ## Project Structure
 
