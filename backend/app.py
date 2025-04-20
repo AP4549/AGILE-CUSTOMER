@@ -4,13 +4,15 @@ import requests
 import os
 import json
 from datetime import datetime
+import google.generativeai as genai
 from data_loader import DataLoader
 
 app = Flask(__name__)
 # Enable CORS with more specific settings
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Configuration
+# Configuration for Ollama
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")
 
@@ -130,215 +132,126 @@ def process_ticket():
         # Process the ticket with multiple agents
         results = {}
         
-        # Agent: Summarizer
-        summary_prompt = f"""
-Analyze this support ticket and provide:
+        agent_functions = {
+            "ollama": call_ollama_agent,
+            "gemini": call_gemini_agent
+        }
+        
+        selected_agent = agent_functions.get(model, call_ollama_agent)  # Default to Ollama
+
+        # --- Agent Prompts ---
+        # To improve readability, prompts are defined as variables
+        
+        def create_agent_prompt(role, instructions, ticket_info, extra_info=""):
+            return f"""{instructions}
+
+Ticket: {ticket_info['subject']}
+Description: {ticket_info['description']}
+{extra_info}
+
+Format your response as valid JSON."""
+
+        # Summarizer
+        results["summary"] = selected_agent(create_agent_prompt(
+            "Summarizer",
+            """You are a customer support AI that accurately summarizes tickets. Analyze this support ticket and provide:
 1. A concise summary (3-4 sentences)
 2. 3-5 key points
-3. Customer sentiment (positive, neutral, or negative)
+3. Customer sentiment (positive, neutral, or negative)""",
+            ticket,
+            ""
+        ))
 
-Ticket: {ticket['subject']}
-Description: {ticket['description']}
-
-Format your response as valid JSON with the following structure:
-{{
-  "summary": "The concise summary here",
-  "keyPoints": ["Point 1", "Point 2", "Point 3"],
-  "sentiment": "neutral"
-}}
-"""
-        
-        summary_result = call_ollama_agent(
-            prompt=summary_prompt,
-            system="You are a customer support AI that accurately summarizes tickets. Always respond with valid JSON.",
-            model=model
-        )
-        results["summary"] = summary_result
-        
-        # Agent: Action Extractor
-        actions_prompt = f"""
-Analyze this support ticket and extract required actions:
-Ticket: {ticket['subject']}
-Description: {ticket['description']}
-
+        # Action Extractor
+        results["actions"] = selected_agent(create_agent_prompt(
+            "Action Extractor",
+            """You are a customer support expert who identifies required actions. Analyze this support ticket and extract required actions:
 Identify 2-4 specific actions that should be taken to resolve this ticket.
 Each action should have:
 1. A type (investigation, customer contact, technical fix, escalation, etc.)
 2. A priority (low, medium, high)
-3. A clear description of what needs to be done
+3. A clear description of what needs to be done""",
+            ticket,
+            ""
+        ))
 
-Format your response as valid JSON with the following structure:
-{{
-  "actions": [
-    {{
-      "type": "investigation",
-      "priority": "high",
-      "description": "Details of what needs to be investigated"
-    }},
-    {{
-      "type": "technical fix",
-      "priority": "medium",
-      "description": "Details of what needs to be fixed"
-    }}
-  ]
-}}
-"""
-        
-        actions_result = call_ollama_agent(
-            prompt=actions_prompt,
-            system="You are a customer support expert who identifies required actions. Always respond with valid JSON.",
-            model=model
-        )
-        results["actions"] = actions_result
-        
-        # Agent: Team Router
-        routing_prompt = f"""
-Analyze this support ticket and determine which team it should be routed to:
-Ticket: {ticket['subject']}
-Description: {ticket['description']}
-
+        # Team Router
+        results["routing"] = selected_agent(create_agent_prompt(
+            "Team Router",
+            """You are a ticket routing specialist. Analyze this support ticket and determine which team it should be routed to:
 Choose the most appropriate team and explain your reasoning.
-Potential teams: technical-support, billing, account-management, product-feedback, security, legal
+Potential teams: technical-support, billing, account-management, product-feedback, security, legal""",
+            ticket,
+            ""
+        ))
 
-Format your response as valid JSON with the following structure:
-{{
-  "recommendedTeam": "technical-support",
-  "confidence": 0.85,
-  "reasoning": "Explanation of why this team is appropriate",
-  "alternativeTeams": [
-    {{"team": "account-management", "confidence": 0.25}}
-  ]
-}}
-"""
-        
-        routing_result = call_ollama_agent(
-            prompt=routing_prompt,
-            system="You are a ticket routing specialist. Always respond with valid JSON.",
-            model=model
-        )
-        results["routing"] = routing_result
-        
-        # NEW Agent: Sentiment Analyzer
-        sentiment_prompt = f"""
-Perform a detailed sentiment analysis of this customer support ticket:
-Ticket: {ticket['subject']}
-Description: {ticket['description']}
-
+        # Sentiment Analyzer
+        results["sentiment"] = selected_agent(create_agent_prompt(
+            "Sentiment Analyzer",
+            """You are a sentiment analysis specialist who can detect emotions and tone in text. Perform a detailed sentiment analysis of this customer support ticket:
 Analyze the customer's emotions, tone, and attitude in the message.
-Be specific about the different emotions detected and their intensity.
+Be specific about the different emotions detected and their intensity.""",
+            ticket,
+            ""
+        ))
 
-Format your response as valid JSON with the following structure:
-{{
-  "overallSentiment": "positive/negative/neutral",
-  "sentimentScore": 0.75,
-  "primaryEmotions": ["frustration", "confusion"],
-  "emotionalTriggers": ["product failure", "unclear instructions"],
-  "customerTone": "professional but urgent",
-  "urgencyLevel": "high/medium/low",
-  "satisfactionIndicators": {{"positive": ["appreciate your help"], "negative": ["third time contacting support"]}}
-}}
-"""
-        
-        sentiment_result = call_ollama_agent(
-            prompt=sentiment_prompt,
-            system="You are a sentiment analysis specialist who can detect emotions and tone in text. Always respond with valid JSON.",
-            model=model
-        )
-        results["sentiment"] = sentiment_result
-        
-        # Agent: Resolution Recommender
-        recommendations_prompt = f"""
-Based on this support ticket and historical data, recommend potential resolutions:
-Ticket: {ticket['subject']}
-Description: {ticket['description']}
+        # Resolution Recommender
+        results["recommendations"] = selected_agent(create_agent_prompt(
+            "Resolution Recommender",
+            """You are a support resolution specialist with access to historical cases. Based on this support ticket and historical data, recommend potential resolutions:
+Provide 1-3 suggested resolutions with clear steps.""",
+            ticket,
+            f"Historical Context:\n{historical_context}"
+        ))
 
-Historical Context:
-{historical_context}
+        # Time Estimator
+        results["timeEstimation"] = selected_agent(create_agent_prompt(
+            "Time Estimator",
+            """You are a support resolution time estimator. Estimate how long it will take to resolve this support ticket:
+Estimate the resolution time in minutes and explain the factors that influenced your estimate.""",
+            ticket,
+            f"Historical Context:\n{historical_context}"
+        ))
 
-Provide 1-3 suggested resolutions with clear steps.
-
-Format your response as valid JSON with the following structure:
-{{
-  "suggestedResolutions": [
-    {{
-      "title": "Title of the resolution approach",
-      "steps": ["Step 1", "Step 2", "Step 3"],
-      "confidence": 0.85,
-      "source": "Based on historical case #TECH_021"
-    }}
-  ]
-}}
-"""
-        
-        recommendations_result = call_ollama_agent(
-            prompt=recommendations_prompt,
-            system="You are a support resolution specialist with access to historical cases. Always respond with valid JSON.",
-            model=model
-        )
-        results["recommendations"] = recommendations_result
-        
-        # Agent: Time Estimator
-        time_prompt = f"""
-Estimate how long it will take to resolve this support ticket:
-Ticket: {ticket['subject']}
-Description: {ticket['description']}
-
-Historical Context:
-{historical_context}
-
-Estimate the resolution time in minutes and explain the factors that influenced your estimate.
-
-Format your response as valid JSON with the following structure:
-{{
-  "estimatedMinutes": 45,
-  "confidence": 0.7,
-  "factors": [
-    {{"name": "Technical complexity", "impact": 0.3}},
-    {{"name": "Clear reproduction steps", "impact": -0.1}},
-    {{"name": "Historical data from similar cases", "impact": 0.1}}
-  ]
-}}
-"""
-        
-        time_result = call_ollama_agent(
-            prompt=time_prompt,
-            system="You are a support resolution time estimator. Always respond with valid JSON.",
-            model=model
-        )
-        results["timeEstimation"] = time_result
-        
         return jsonify(results)
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-def call_ollama_agent(prompt, system="", model=DEFAULT_MODEL):
-    """Call Ollama API with the given prompt and system message"""
+def call_ollama_agent(prompt, model=DEFAULT_MODEL):
+    """Call Ollama API with the given prompt (which includes system prompt)"""
     try:
         response = requests.post(
             f"{OLLAMA_URL}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "system": system,
-                "stream": False
-            }
+            json={"model": model, "prompt": prompt, "stream": False}  # Use combined prompt
         )
-        
         if response.status_code == 200:
             result = response.json().get("response", "")
-            # Attempt to parse as JSON if it looks like JSON
-            if result.strip().startswith("{") and result.strip().endswith("}"):
-                try:
-                    return json.loads(result)
-                except:
-                    pass
-            return {"text": result}
+            try:
+                return json.loads(result)  # Attempt to parse JSON
+            except json.JSONDecodeError:
+                return {"text": result}  # Return as text if parsing fails
         else:
             return {"error": f"Ollama API returned status code {response.status_code}"}
     except Exception as e:
         return {"error": str(e)}
 
-if __name__ == '__main__':
-    print("Starting AI Customer Support System Backend...")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+def call_gemini_agent(prompt):
+    """Call Gemini API with the given prompt"""
+    if not GEMINI_API_KEY:
+        return {"error": "Gemini API key not configured."}
+
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-pro')  # or 'gemini-pro-vision' if you need image support
+        response = model.generate_content(prompt)
+        if response and response.text:
+            try:
+                return json.loads(response.text)  # Attempt to parse JSON
+            except json.JSONDecodeError:
+                return {"text": response.text}  # Return as text if parsing fails
+        else:
+            return {"error": "Gemini API returned an empty or invalid response."}
+    except Exception as e:
+        return {"error": f"Error communicating with Gemini API: {e}"}
+
